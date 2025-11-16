@@ -79,6 +79,9 @@ app.post('/api/analyze', upload.single('file'), async (req, res) => {
 
     return res.json(payload);
   } catch (error) {
+    if (error && error.code === 'NON_FOOD_ITEM' && error.payload?.detail) {
+      return res.status(400).json({ detail: error.payload.detail });
+    }
     console.error('Analyze failed', error);
     return res.status(500).json({
       error: 'Unexpected server error while analyzing product.',
@@ -98,6 +101,32 @@ app.use((err, _req, res, _next) => {
 app.listen(port, () => {
   console.log(`CATRA backend running on http://localhost:${port}`);
 });
+
+function isNonFoodPrediction(payload) {
+  const name = `${payload?.product_name ?? payload?.name ?? ''}`.trim().toLowerCase();
+  const nutrition = payload?.nutrition ?? {};
+
+  const macros = ['calories', 'protein', 'fat', 'carbs', 'sugar', 'salt', 'fiber'];
+  const hasAnyMacro =
+    macros.some((k) => {
+      const v = nutrition?.[k];
+      if (v === null || v === undefined) return false;
+      const num = typeof v === 'number' ? v : Number(String(v).replace(/[^\d.-]/g, ''));
+      return !Number.isNaN(num) && num > 0;
+    });
+
+  // Heuristics:
+  // - Missing/unknown name
+  // - No detectable nutrition macros
+  const unknownName =
+    name.length === 0 ||
+    name === 'unknown' ||
+    name === 'unknown item' ||
+    name === 'non-food' ||
+    name.includes('not food');
+
+  return unknownName && !hasAnyMacro;
+}
 
 function buildPrompt() {
   return `You are CATRA's nutrition AI. Given a grocery product photo, analyze labels
@@ -146,7 +175,19 @@ function parseStructuredJson(text) {
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) return null;
   try {
-    return JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(jsonMatch[0]);
+    // Business rule: if prediction indicates a non-food item, return a 400-friendly payload upstream.
+    if (isNonFoodPrediction(parsed)) {
+      // Throw a sentinel error object we can recognize in the route handler
+      const err = new Error('NON_FOOD_ITEM');
+      err.code = 'NON_FOOD_ITEM';
+      err.payload = {
+        detail:
+          'Unknown product - this appears to be a non-food item or not suitable for human consumption',
+      };
+      throw err;
+    }
+    return parsed;
   } catch {
     return null;
   }

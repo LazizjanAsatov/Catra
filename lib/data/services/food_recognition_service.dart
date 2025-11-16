@@ -9,12 +9,20 @@ import 'package:image_picker/image_picker.dart';
 import '../models/enums.dart';
 import '../models/product.dart';
 
+class ApiBadRequest implements Exception {
+  ApiBadRequest(this.detail, {this.uri});
+  final String detail;
+  final Uri? uri;
+  @override
+  String toString() => detail;
+}
+
 class FoodRecognitionService {
   FoodRecognitionService({http.Client? client})
     : _client = client ?? http.Client();
 
   static const String _endpoint =
-      'https://food-ai-check.jprq.live/analyze-food';
+      'http://localhost:8000/analyze-food';
 
   final http.Client _client;
 
@@ -33,6 +41,20 @@ class FoodRecognitionService {
 
     final streamed = await _client.send(request);
     final response = await http.Response.fromStream(streamed);
+    if (response.statusCode == 400) {
+      try {
+        final body = jsonDecode(response.body);
+        final detail = (body is Map<String, dynamic>)
+            ? body['detail']?.toString()
+            : null;
+        if (detail != null && detail.isNotEmpty) {
+          throw ApiBadRequest(detail, uri: uri);
+        }
+      } catch (_) {
+        // fall through to generic error below
+      }
+      throw ApiBadRequest('Bad request', uri: uri);
+    }
     if (response.statusCode != 200) {
       throw HttpException(
         'Food recognition failed: ${response.statusCode}',

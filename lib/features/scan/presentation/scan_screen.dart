@@ -11,6 +11,7 @@ import '../../../data/models/consumed_entry.dart';
 import '../../../data/models/product.dart';
 import '../../../data/repositories/consumption_repository.dart';
 import '../../../data/repositories/product_repository.dart';
+import '../../../data/services/food_recognition_service.dart';
 import '../../../widgets/empty_state.dart';
 import '../controllers/scan_controller.dart';
 
@@ -125,7 +126,68 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
               );
             },
             loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Text('Error: $error'),
+            error: (error, _) {
+              // If it's ApiBadRequest, use the exact backend detail.
+              String cleaned;
+              if (error is ApiBadRequest) {
+                cleaned = error.detail.trim();
+              } else {
+                final raw = error.toString();
+                cleaned = raw
+                    .replaceFirst(RegExp(r'^HttpException:\s*'), '')
+                    .replaceFirst(
+                      RegExp(r',?\s*uri=.*$', caseSensitive: false),
+                      '',
+                    )
+                    .trim();
+              }
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                final scheme = Theme.of(context).colorScheme;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(Icons.error_outline,
+                            color: scheme.onError, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            cleaned,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(color: scheme.onError),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    backgroundColor: scheme.error,
+                    behavior: SnackBarBehavior.floating,
+                    elevation: 0,
+                    duration: const Duration(seconds: 4),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    action: SnackBarAction(
+                      label: 'Dismiss',
+                      textColor: scheme.onError,
+                      onPressed: () {
+                        // no-op; action just dismisses
+                      },
+                    ),
+                  ),
+                );
+              });
+              return const SizedBox.shrink();
+            },
           ),
         ],
       ),
